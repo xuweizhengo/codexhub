@@ -1,0 +1,64 @@
+name: Mirror upstream main
+
+on:
+  push:
+    branches:
+      - automation
+    paths:
+      - .github/workflows/mirror-upstream.yml
+  schedule:
+    - cron: '17 0 * * *'
+      timezone: Asia/Tokyo
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mirror-upstream-main
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout automation branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mirror happy-loki/codexhub main
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git remote add upstream https://github.com/happy-loki/codexhub.git 2>/dev/null || \
+            git remote set-url upstream https://github.com/happy-loki/codexhub.git
+
+          git fetch --no-tags upstream main
+          git fetch --no-tags origin main
+
+          upstream_sha="$(git rev-parse refs/remotes/upstream/main)"
+          fork_sha="$(git rev-parse refs/remotes/origin/main)"
+
+          echo "upstream main: $upstream_sha"
+          echo "fork main:     $fork_sha"
+
+          if [ "$upstream_sha" = "$fork_sha" ]; then
+            echo "Already synchronized."
+            exit 0
+          fi
+
+          git push \
+            --force-with-lease=refs/heads/main:"$fork_sha" \
+            origin "$upstream_sha":refs/heads/main
+
+          git fetch --no-tags origin main
+          actual_sha="$(git rev-parse refs/remotes/origin/main)"
+
+          if [ "$actual_sha" != "$upstream_sha" ]; then
+            echo "Mirror verification failed: expected $upstream_sha, got $actual_sha" >&2
+            exit 1
+          fi
+
+          echo "Mirror synchronized to $actual_sha"
