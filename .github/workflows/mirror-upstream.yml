@@ -22,24 +22,15 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout automation branch
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Mirror happy-loki/codexhub main
+      - name: Sync fork main from upstream
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          git remote add upstream https://github.com/happy-loki/codexhub.git 2>/dev/null || \
-            git remote set-url upstream https://github.com/happy-loki/codexhub.git
-
-          git fetch --no-tags upstream main
-          git fetch --no-tags origin main
-
-          upstream_sha="$(git rev-parse refs/remotes/upstream/main)"
-          fork_sha="$(git rev-parse refs/remotes/origin/main)"
+          upstream_sha="$(git ls-remote https://github.com/happy-loki/codexhub.git refs/heads/main | cut -f1)"
+          fork_sha="$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | cut -f1)"
 
           echo "upstream main: $upstream_sha"
           echo "fork main:     $fork_sha"
@@ -49,12 +40,14 @@ jobs:
             exit 0
           fi
 
-          git push \
-            --force-with-lease=refs/heads/main:"$fork_sha" \
-            origin "$upstream_sha":refs/heads/main
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${GITHUB_REPOSITORY}/merge-upstream" \
+            -f branch=main
 
-          git fetch --no-tags origin main
-          actual_sha="$(git rev-parse refs/remotes/origin/main)"
+          actual_sha="$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | cut -f1)"
 
           if [ "$actual_sha" != "$upstream_sha" ]; then
             echo "Mirror verification failed: expected $upstream_sha, got $actual_sha" >&2
